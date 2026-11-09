@@ -19,13 +19,13 @@ O EmbImage oferece um fluxo visual simples para:
 
 ## Uso para a pessoa usuária
 
-1. Abra `Preparador_de_Logos.pyw`.
-2. Clique em **① Abrir imagem** e selecione a arte.
-3. Em **② Cores do desenho**, use os botões **−** e **+** para escolher de 2 a 12 em **Quantidade de cores a identificar**. Use um número menor para ignorar pequenas variações e um maior quando o logo tiver mais cores importantes.
-4. Clique em uma cor identificada. O app mostrará as outras cores encontradas na própria imagem; escolha uma delas para unir os dois tons.
-5. Em **Bordas da imagem**, ajuste a suavidade entre 1 e 3 apenas se necessário. O nível 2 é o padrão recomendado; 1 preserva mais detalhes e 3 suaviza mais as curvas.
-6. Se precisar tratar o fundo, abra **⚙ Mais opções**. Ali é possível removê-lo, escolher a cor de fundo ou clicar sobre o fundo na prévia original para identificá-lo.
-7. Confira a prévia e clique em **③ Salvar PNG**. O PNG terá até 2.000 px no maior lado.
+1. Abra `Preparador_de_Logos.pyw` e clique em **① Abrir imagem**.
+2. O app pergunta qual é a cor do fundo. Confirme a cor detectada nos cantos ou clique em **Escolher a cor** e depois no fundo da prévia original.
+3. Escolha se quer manter a cor de fundo original ou substituí-la. Quando substituir, selecione fundo branco, transparente, preto ou uma cor personalizada.
+4. Em **④ Ajuste as cores**, mantenha as cores encontradas ou clique em uma delas para uni-la a outra cor já detectada. Use os botões **−** e **+** para identificar de 2 a 12 cores.
+5. Em **⑤ Qualidade das bordas**, ajuste a suavidade entre 1 e 3 apenas se necessário. O nível 2 é o padrão recomendado; 1 preserva mais detalhes e 3 suaviza mais as curvas.
+6. Para logos com linhas muito estreitas, abra **⚙ Opções avançadas** e ative **Preservar detalhes finos**. Esse modo usa uma vetorização muito menos simplificada, preservando traços delicados sem o aspecto pixelado.
+7. Confira a prévia e clique em **⑥ Salvar PNG**. O PNG terá até 2.000 px no maior lado.
 8. Importe o PNG resultante no PE-Design Next para digitalizar o bordado.
 
 Por exemplo, se a imagem contém rosa, verde-claro e verde-escuro, ao clicar no verde-claro as opções serão rosa e verde-escuro. Escolha verde-escuro para bordar a folha com uma única linha verde. A prévia mostra o resultado antes de salvar. Para a maior parte dos logos, remova o fundo e exporte com **fundo branco**. Transparência é útil quando o software de destino a interpreta corretamente.

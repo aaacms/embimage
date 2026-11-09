@@ -119,7 +119,7 @@ def apply_palette(rgba, palette, replacements):
     return out
 
 
-def vectorize_to_png(rgba, palette, replacements, smoothness):
+def vectorize_to_png(rgba, palette, replacements, smoothness, preserve_details=False):
     """Traça a imagem já reduzida à paleta e a renderiza novamente em até 2000 px.
 
     O SVG existe apenas em memória: a saída pública do app continua sendo PNG.
@@ -142,7 +142,11 @@ def vectorize_to_png(rgba, palette, replacements, smoothness):
             target_colors.append(target)
     config=vtracer.Config(mode='spline',hierarchical='cutout')
     config.palette=['#%02x%02x%02x' % color for color in target_colors]
-    config.simplify=EDGE_SMOOTHNESS[smoothness]
+    # Com detalhes finos, uma simplificação comum pode eliminar curvas e
+    # segmentos de apenas poucos pixels. O valor bem baixo mantém esses
+    # segmentos, mas ainda deixa a borda vetorial mais limpa que um raster
+    # ampliado diretamente.
+    config.simplify=0.08 if preserve_details else EDGE_SMOOTHNESS[smoothness]
     svg=config.convert_bytes(source_bytes.getvalue())
     factor=OUTPUT_MAX_SIDE/max(source.size)
     width=max(1,round(source.width*factor))
@@ -153,14 +157,22 @@ def vectorize_to_png(rgba, palette, replacements, smoothness):
         return result.convert('RGBA').copy()
 
 
-def process(img, palette, replacements, bg_mode, bg_color, anywhere, smoothness):
+def process(img, palette, replacements, bg_mode, bg_color, anywhere, smoothness, keep_thin_details=False):
     rgba=np.asarray(img.convert('RGBA')).copy()
     if bg_mode != BACKGROUNDS[0]:
         bg_color=color_at_corner(img) if bg_mode==BACKGROUNDS[1] or bg_color is None else bg_color
         rgba=remove_background(rgba,bg_color,BACKGROUND_TOLERANCE,anywhere)
-    rgba[:,:,:3]=cv2.bilateralFilter(rgba[:,:,:3],5,38,38)
+    if not keep_thin_details:
+        rgba[:,:,:3]=cv2.bilateralFilter(rgba[:,:,:3],5,38,38)
+    elif max(rgba.shape[:2]) < OUTPUT_MAX_SIDE:
+        # No modo de detalhes finos, ampliar antes de reduzir a paleta mantém
+        # as bordas antisserrilhadas da arte. Fazer o contrário transforma
+        # cada pixel original em um degrau muito visível no PNG final.
+        factor=OUTPUT_MAX_SIDE/max(rgba.shape[:2])
+        size=(max(1,round(rgba.shape[1]*factor)),max(1,round(rgba.shape[0]*factor)))
+        rgba=np.asarray(Image.fromarray(rgba,'RGBA').resize(size,Image.Resampling.LANCZOS)).copy()
     rgba=apply_palette(rgba,palette,replacements)
-    return vectorize_to_png(rgba,palette,replacements,smoothness)
+    return vectorize_to_png(rgba,palette,replacements,smoothness,keep_thin_details)
 
 
 def apply_export_background(img, mode, custom_color):
@@ -242,9 +254,9 @@ class App:
         self.export_bg = tk.StringVar(value=EXPORT_BACKGROUNDS[0])
         self.palette_size = tk.IntVar(value=PALETTE_SIZE)
         self.edge_smoothness = tk.IntVar(value=2)
-        self.status = tk.StringVar(value='Comece abrindo uma imagem.')
+        self.keep_thin_details = tk.BooleanVar(value=False)
+        self.status = tk.StringVar(value='Passo 1 de 6: abra uma imagem para começar.')
         self.bg_hint = tk.StringVar(value='Automático: usa a cor dos cantos da imagem.')
-        self.advanced_visible = False
         self.build()
         root.bind('<Control-o>', lambda e:self.open_file())
         root.bind('<Control-s>', lambda e:self.save_png())
@@ -278,7 +290,7 @@ class App:
         self.file_label=ttk.Label(top,text='Nenhuma imagem selecionada',foreground=MUTED)
         self.file_label.pack(side='left',padx=8)
         save_group=ttk.Frame(top);save_group.pack(side='right')
-        self.step_badge(save_group,'3',primary=True).pack(side='left',padx=(0,8))
+        self.step_badge(save_group,'6',primary=True).pack(side='left',padx=(0,8))
         ttk.Button(save_group,text='Salvar PNG',style='Primary.TButton',command=self.save_png).pack(side='left')
 
         body=tk.Frame(self.root,bg=APP_BACKGROUND)
@@ -317,7 +329,7 @@ class App:
         palette_card=RoundedPanel(left,padding=18)
         palette_card.pack(fill='x',pady=(2,12))
         palette_inner=palette_card.content
-        self.card_title(palette_inner,'2','Ajuste as cores').pack(anchor='w',pady=(0,7))
+        self.card_title(palette_inner,'4','Ajuste as cores').pack(anchor='w',pady=(0,7))
         ttk.Label(palette_inner,text='Escolha as cores que realmente serão usadas no bordado.',style='CardMuted.TLabel',wraplength=267).pack(anchor='w',pady=(0,14))
         ttk.Label(palette_inner,text='Quantidade de cores',style='Card.TLabel').pack(anchor='w')
         color_count=tk.Frame(palette_inner,bg=CARD_BACKGROUND)
@@ -334,7 +346,7 @@ class App:
         edge_card=RoundedPanel(left,padding=18)
         edge_card.pack(fill='x',pady=(0,12))
         edge_inner=edge_card.content
-        ttk.Label(edge_inner,text='Qualidade das bordas',style='Card.TLabel',font=('Segoe UI',12,'bold')).pack(anchor='w')
+        self.card_title(edge_inner,'5','Qualidade das bordas').pack(anchor='w',pady=(0,3))
         ttk.Label(edge_inner,text='Suavidade das bordas',style='Card.TLabel',font=('Segoe UI',10,'bold')).pack(anchor='w',pady=(12,0))
         edge_control=tk.Frame(edge_inner,bg=CARD_BACKGROUND)
         edge_control.pack(anchor='w',pady=(3,4))
@@ -343,26 +355,34 @@ class App:
         ttk.Button(edge_control,text='+',style='Count.TButton',width=3,command=lambda:self.change_edge_smoothness(1)).pack(side='left')
         ttk.Label(edge_inner,text='1 preserva mais detalhes; 3 deixa as curvas mais suaves. A imagem salva terá até 2000 px no maior lado.',style='CardMuted.TLabel',wraplength=267).pack(anchor='w')
 
-        self.adv_button=ttk.Button(left,text='Mais opções  ▾',command=self.toggle_advanced)
-        self.adv_button.pack(fill='x',pady=(0,7))
+        self.details_adv_button=ttk.Button(left,text='⚙  Opções avançadas  ▾',command=self.toggle_advanced)
+        self.details_adv_button.pack(fill='x',pady=(0,7))
+        self.details_adv=RoundedPanel(left,padding=18)
+        adv_inner=self.details_adv.content
+        ttk.Label(adv_inner,text='Detalhes finos',style='Card.TLabel',font=('Segoe UI',12,'bold')).pack(anchor='w',pady=(0,6))
+        ttk.Checkbutton(adv_inner,text='Preservar detalhes finos',variable=self.keep_thin_details,command=self.queue).pack(anchor='w')
+        ttk.Label(adv_inner,text='Indicado para linhas estreitas, letras pequenas e desenhos delicados. Usa uma vetorização bem precisa para manter os traços sem aspecto pixelado.',style='CardMuted.TLabel',wraplength=267).pack(anchor='w',pady=(6,0))
+
         self.adv=RoundedPanel(left,padding=18)
         adv_inner=self.adv.content
-        ttk.Label(adv_inner,text='Opções avançadas',style='Card.TLabel',font=('Segoe UI',12,'bold')).pack(anchor='w',pady=(0,10))
+        self.adv.pack(fill='x',pady=(2,12),before=palette_card)
+        self.card_title(adv_inner,'2','Escolha a cor do fundo').pack(anchor='w',pady=(0,7))
+        ttk.Label(adv_inner,text='O programa detecta a cor dos cantos automaticamente. Se não for o fundo certo, clique no botão e depois sobre o fundo na imagem original.',style='CardMuted.TLabel',wraplength=267).pack(anchor='w',pady=(0,10))
         bgcard=tk.Frame(adv_inner,bg=CARD_BACKGROUND)
         bgcard.pack(fill='x',pady=(0,10))
-        ttk.Label(bgcard,text='Fundo da imagem',style='Card.TLabel',font=('Segoe UI',10,'bold')).pack(anchor='w',pady=(0,7))
-        ttk.Checkbutton(bgcard,text='Remover fundo atual',variable=self.remove_bg,command=self.toggle_remove).pack(anchor='w')
-        self.pick_btn=ttk.Button(bgcard,text='Escolher fundo clicando na imagem',command=self.enable_click_pick)
+        self.card_title(bgcard,'3','Manter ou mudar o fundo?').pack(anchor='w',pady=(0,7))
+        ttk.Checkbutton(bgcard,text='Manter a cor de fundo original',variable=self.remove_bg,offvalue=True,onvalue=False,command=self.toggle_remove).pack(anchor='w')
+        self.pick_btn=ttk.Button(bgcard,text='Escolher a cor clicando na imagem original',command=self.enable_click_pick)
         self.pick_btn.pack(fill='x',pady=(7,3))
         ttk.Label(bgcard,textvariable=self.bg_hint,style='CardMuted.TLabel',wraplength=245).pack(anchor='w',pady=(0,8))
-        ttk.Label(bgcard,text='Colocar no lugar:',style='Card.TLabel').pack(anchor='w')
+        ttk.Label(bgcard,text='Se mudar, colocar no lugar:',style='Card.TLabel').pack(anchor='w')
         self.bg_picker=ttk.Combobox(bgcard,state='readonly',textvariable=self.export_bg,values=EXPORT_BACKGROUNDS,width=31)
         self.bg_picker.pack(fill='x',pady=(4,6))
         self.bg_picker.bind('<<ComboboxSelected>>',lambda e:self.choose_export_option())
         self.color_bg_btn=ttk.Button(bgcard,text='Escolher uma cor personalizada...',command=self.pick_export_bg)
         self.color_bg_btn.pack(fill='x')
         ttk.Checkbutton(adv_inner,text='Remover cor também em áreas internas',variable=self.anywhere,command=self.queue).pack(anchor='w',pady=(0,5))
-        ttk.Label(left,text='Role para ver todos os ajustes.',foreground=MUTED).pack(anchor='w',pady=(0,5))
+        ttk.Label(left,text='Passo 6: quando terminar, clique em “Salvar PNG” no topo.',foreground=MUTED,wraplength=290).pack(anchor='w',pady=(0,5))
 
         preview_card=RoundedPanel(body,padding=22,expand_height=True)
         preview_card.pack(side='left',fill='both',expand=True)
@@ -379,7 +399,7 @@ class App:
             label.bind('<Configure>',lambda e:self.refresh())
             self.labels.append(label)
         self.labels[0].bind('<Button-1>',self.pick_background)
-        ttk.Label(right,text='Dica: em “Mais opções”, você pode retirar um fundo clicando em “Escolher fundo” e depois sobre ele na imagem original.',style='CardMuted.TLabel',wraplength=780).pack(anchor='w',pady=(14,0))
+        ttk.Label(right,text='Dica: no passo 2, clique em “Escolher a cor” e depois sobre o fundo na imagem original.',style='CardMuted.TLabel',wraplength=780).pack(anchor='w',pady=(14,0))
         ttk.Label(self.root,textvariable=self.status,padding=(28,8),foreground=MUTED).pack(fill='x')
 
     @staticmethod
@@ -486,11 +506,24 @@ class App:
         self.update_palette()
         self.queue()
 
+    def ask_keep_background(self):
+        """Confirma o passo 3 sem esconder a escolha de fundo na interface."""
+        keep=messagebox.askyesno(
+            'Passo 3 de 6: fundo final',
+            'Você quer manter a cor de fundo original na imagem final?\n\n'
+            'Escolha “Não” para retirar o fundo e selecionar uma nova opção.'
+        )
+        self.remove_bg.set(not keep)
+        self.update_palette()
+        self.status.set('Passo 4 de 6: mantenha as cores ou clique em uma delas para trocá-la.')
+        self.queue()
+
     def enable_click_pick(self):
         if self.original is None:
             messagebox.showinfo('Abra uma imagem','Primeiro, clique em “Abrir imagem”.');return
         self.remove_bg.set(True)
         self.bg_mode.set(BACKGROUNDS[2]);self.bg_hint.set('Agora clique sobre o fundo na imagem ORIGINAL, à direita.')
+        self.status.set('Passo 2 de 6: clique na cor do fundo na imagem original.')
         self.queue()
 
     def choose_export_option(self):
@@ -498,22 +531,12 @@ class App:
         else:self.refresh()
 
     def toggle_advanced(self):
-        self.advanced_visible=not self.advanced_visible
-        if self.advanced_visible:
-            self.adv.pack(fill='x',pady=(0,8));self.adv_button.configure(text='⚙  Menos opções  ▴');self.root.after_idle(self._show_advanced)
+        if self.details_adv.winfo_manager():
+            self.details_adv.pack_forget()
+            self.details_adv_button.configure(text='⚙  Opções avançadas  ▾')
         else:
-            self.adv.pack_forget();self.adv_button.configure(text='⚙  Mais opções  ▾')
-
-    def _show_advanced(self):
-        # Após expandir, traz as novas opções para a área visível.
-        canvas=self.sidebar_canvas
-        canvas.update_idletasks()
-        canvas.configure(scrollregion=canvas.bbox('all'))
-        region=canvas.bbox('all')
-        if region and region[3]>canvas.winfo_height():
-            y=self.adv_button.winfo_rooty()-canvas.winfo_rooty()
-            scroll_max=max(1,region[3]-canvas.winfo_height())
-            canvas.yview_moveto(min(1.0,max(0.0,(y-20)/scroll_max)))
+            self.details_adv.pack(fill='x',pady=(0,10),after=self.details_adv_button)
+            self.details_adv_button.configure(text='⚙  Menos opções  ▴')
 
     def pick_background(self,event):
         if self.original is None or not self._preview_bounds:return
@@ -526,8 +549,7 @@ class App:
         self.chosen_bg=tuple(int(n) for n in np.median(sample.reshape(-1,3),axis=0))
         self.bg_mode.set(BACKGROUNDS[2]);self.remove_bg.set(True)
         self.bg_hint.set('Cor escolhida: #%02X%02X%02X. Clique novamente para mudar.'%self.chosen_bg)
-        self.update_palette()
-        self.queue()
+        self.ask_keep_background()
 
     def pick_export_bg(self):
         rgb,code=colorchooser.askcolor(color='#%02x%02x%02x'%self.custom_bg,title='Cor final do fundo')
@@ -545,8 +567,16 @@ class App:
             self.bg_mode.set(BACKGROUNDS[1]);self.remove_bg.set(True)
             self.bg_hint.set('Automático: cor dos cantos. Se não ficar bom, clique na imagem original.')
             self.file_label.configure(text=Path(f).name)
-            self.update_palette()
-            self.status.set('Imagem carregada. Ajuste as cores e salve.');self.queue()
+            color='#%02X%02X%02X' % self.chosen_bg
+            confirmed=messagebox.askyesno(
+                'Passo 2 de 6: cor do fundo',
+                f'O programa identificou {color} nos cantos da imagem. Essa é a cor do fundo?\n\n'
+                'Escolha “Não” para clicar na cor correta na prévia original.'
+            )
+            if confirmed:
+                self.ask_keep_background()
+            else:
+                self.enable_click_pick()
         except Exception as ex:messagebox.showerror('Erro ao abrir',str(ex))
 
     def queue(self):
@@ -557,7 +587,7 @@ class App:
     def start(self):
         self._scheduled=None;self.job+=1;job=self.job
         bgmode=(self.bg_mode.get() if self.remove_bg.get() else BACKGROUNDS[0])
-        args=(self.palette,self.color_replacements,bgmode,self.chosen_bg,self.anywhere.get(),self.edge_smoothness.get())
+        args=(self.palette,self.color_replacements,bgmode,self.chosen_bg,self.anywhere.get(),self.edge_smoothness.get(),self.keep_thin_details.get())
         img=self.original.copy();self.status.set('Preparando a imagem...')
         def worker():
             try:
