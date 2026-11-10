@@ -19,18 +19,35 @@ O EmbImage oferece um fluxo visual simples para:
 
 ## Uso para a pessoa usuária
 
-1. Abra `Preparador_de_Logos.pyw` e clique em **① Abrir imagem**.
-2. O app pergunta qual é a cor do fundo. Confirme a cor detectada nos cantos ou clique em **Escolher a cor** e depois no fundo da prévia original.
-3. Escolha se quer manter a cor de fundo original ou substituí-la. Quando substituir, selecione fundo branco, transparente, preto ou uma cor personalizada.
-4. Em **④ Ajuste as cores**, mantenha as cores encontradas ou clique em uma delas para uni-la a outra cor já detectada. Use os botões **−** e **+** para identificar de 2 a 12 cores.
-5. Em **⑤ Qualidade das bordas**, ajuste a suavidade entre 1 e 3 apenas se necessário. O nível 2 é o padrão recomendado; 1 preserva mais detalhes e 3 suaviza mais as curvas.
-6. Para logos com linhas muito estreitas, abra **⚙ Opções avançadas** e ative **Preservar detalhes finos**. Esse modo usa uma vetorização muito menos simplificada, preservando traços delicados sem o aspecto pixelado.
-7. Confira a prévia e clique em **⑥ Salvar PNG**. O PNG terá até 2.000 px no maior lado.
-8. Importe o PNG resultante no PE-Design Next para digitalizar o bordado.
+Siga os números na lateral do aplicativo:
 
-Por exemplo, se a imagem contém rosa, verde-claro e verde-escuro, ao clicar no verde-claro as opções serão rosa e verde-escuro. Escolha verde-escuro para bordar a folha com uma única linha verde. A prévia mostra o resultado antes de salvar. Para a maior parte dos logos, remova o fundo e exporte com **fundo branco**. Transparência é útil quando o software de destino a interpreta corretamente.
+1. **Abrir imagem:** selecione o logo.
+2. **Cor do fundo:** a cor é detectada automaticamente; use **Escolher na imagem** se precisar corrigir.
+3. **Fundo final:** mantenha o original ou escolha branco, transparente, preto ou outra cor.
+4. **Cores:** ajuste a quantidade com **− / +**. Clique em uma amostra para uni-la a outra cor.
+5. **Bordas:** ajuste de 1 (mais detalhes) a 3 (mais suave). Em **Opções avançadas** ficam apenas os ajustes anteriores de detalhes finos e remoção em áreas internas.
+6. **Salvar PNG:** confira original e resultado e escolha onde salvar.
 
-## Requisitos
+A seleção de fundo só funciona após ativar **Escolher na imagem**; o mesmo botão cancela a seleção. O salvamento aguarda a atualização do resultado. O PNG pode ser importado no PE-Design Next.
+
+Atalhos: Ctrl+O para abrir, Ctrl+S para salvar e Ctrl+Z para desfazer um ajuste.
+
+## Usar em outro computador (sem Python)
+
+O pacote portátil está em `dist/EmbImage-Windows.zip`. Copie esse ZIP para o outro computador, clique com o botão direito e escolha **Extrair tudo**. Abra a pasta extraída e dê dois cliques em **EmbImage.exe**.
+
+Mantenha a pasta `_internal` junto do executável. Não é necessário instalar Python, ter internet ou abrir um terminal. O pacote é destinado ao Windows 10/11 de 64 bits.
+
+Para gerar novamente o pacote, neste projeto e com Python de 64 bits no Windows:
+
+```powershell
+.venv/Scripts/python.exe -m pip install -r requirements-build.txt
+.venv/Scripts/python.exe build_windows.py
+```
+
+O empacotamento usa [PyInstaller](https://www.pyinstaller.org/en/stable/operating-mode.html). As dependências ficam dentro do pacote; os arquivos pessoais usados nos testes não são incluídos.
+
+## Requisitos para executar pelo código-fonte
 
 - Windows (a interface usa Tkinter e o arquivo de entrada é `.pyw`)
 - Python 3.10 ou mais recente
@@ -65,9 +82,11 @@ Esse modo detecta a paleta predominante, remove automaticamente a cor dos cantos
 
 ```text
 .
-├── Preparador_de_Logos.pyw  # Interface Tkinter e pipeline de imagem
-├── requirements.txt         # Dependências Python
-└── README.md                # Documentação do projeto
+├── Preparador_de_Logos.pyw  # Ponto de entrada e processamento de imagem
+├── embimage_ui.py           # Interface Tkinter e coordenação das tarefas
+├── tests/                  # Regressões do fluxo de edição e layout
+├── requirements.txt        # Dependências Python
+└── README.md               # Documentação do projeto
 ```
 
 ## Como o processamento funciona
@@ -76,19 +95,21 @@ O pipeline principal está na função `process` em `Preparador_de_Logos.pyw`:
 
 1. A imagem é carregada como RGBA; imagens acima de 4200 px no maior lado são reduzidas.
 2. O fundo opcional é detectado pela mediana dos quatro cantos ou por uma cor amostrada na prévia.
-3. Fundos coloridos são comparados em HSV; fundos neutros, em LAB. A remoção atua no canal alfa e pode ficar limitada às regiões conectadas à borda.
-4. A imagem é suavizada levemente e seus pixels são agrupados em uma paleta de 2 a 12 cores, escolhida na interface.
+3. Antes de reduzir as cores, a imagem é redimensionada para até 2.000 px no maior lado, preservando as bordas intermediárias. No JPEG, a máscara de fundo é calculada antes da ampliação, para não destacar blocos de compressão. Fundos coloridos são comparados em HSV; fundos neutros, em LAB. A remoção atua no canal alfa e pode ficar limitada às regiões conectadas à borda.
+4. A imagem é suavizada levemente e seus pixels são agrupados em uma paleta de 2 a 12 cores, escolhida na interface. A redução de cores e o traçado já ocorrem na resolução final, evitando ampliar degraus criados na imagem pequena.
 5. Cada cor da paleta pode ser substituída por outra cor já detectada na imagem, permitindo unir tons semelhantes antes de bordar sem introduzir uma nova cor.
-6. As regiões de cor são vetorizadas internamente, suavizadas conforme o nível escolhido e renderizadas novamente como PNG de até 2.000 px no maior lado.
+6. As regiões de cor são vetorizadas internamente com tolerância de curvas de 0,3 / 0,6 / 1 pixel da saída nos níveis 1 / 2 / 3 para PNG. No JPEG, a máscara e a tolerância são suavizadas conforme a escala da ampliação para reduzir serrilhados da compressão. Em artes neutras sobre fundo colorido, a separação considera a cromaticidade para não seguir os blocos do JPEG. Fragmentos novos e isolados são comparados aos componentes da origem antes de serem descartados; pontos e acentos originais são preservados. **Preservar detalhes finos** desativa essa limpeza adicional.
 7. Na exportação, a transparência é preservada ou composta sobre o fundo selecionado.
 
-O app usa uma thread de trabalho para processar a imagem sem travar a interface. Alterações nos controles são agrupadas com um pequeno atraso antes de iniciar novo processamento.
+Onde o traçado altera componentes muito finos, o app recupera a cobertura parcial da imagem de entrada e aplica as uniões de cores. Em fundos coloridos, essa recuperação respeita a máscara de fundo para não ressuscitar resíduos. Transparências existentes não se tornam opacas.
+
+O app usa uma única thread de trabalho por vez, inclusive para identificar cores, sem executar operações do Tkinter nessa thread. Alterações nos controles são agrupadas com um pequeno atraso. Resultados de ajustes ou imagens anteriores são descartados; o salvamento só é liberado quando a prévia corresponde aos ajustes atuais.
 
 ## Limitações conhecidas
 
-- A vetorização suaviza bordas serrilhadas, mas não recupera detalhes que não existiam na imagem original. Use o nível 1 quando detalhes pequenos forem importantes.
+- A vetorização suaviza bordas serrilhadas, mas não recupera detalhes que não existiam na imagem original. Traços menores que um pixel podem continuar suaves, para não inventar espessuras. Use **Bordas 1** quando detalhes pequenos forem importantes.
 - Remoção por cor funciona melhor com fundos uniformes. Fotos, sombras, degradês e cores semelhantes às do logo podem exigir selecionar manualmente a cor do fundo na prévia.
-- Ao alterar a quantidade de cores identificadas, a paleta é recalculada e as uniões de cores feitas anteriormente são desfeitas.
+- Ao alterar a quantidade de cores identificadas ou a remoção de fundo, a paleta é recalculada e as uniões anteriores são desfeitas. Use `Ctrl+Z` para recuperar o ajuste anterior e suas uniões.
 - A qualidade final do bordado ainda depende da digitalização, do tamanho físico, do tecido, da estabilização e das configurações de pontos escolhidas no PE-Design Next.
 
 ## Orientações para contribuidores e assistentes de IA
@@ -104,8 +125,17 @@ O app usa uma thread de trabalho para processar a imagem sem travar a interface.
 - Antes de enviar uma alteração, valide ao menos a sintaxe com:
 
   ```powershell
-  python -c "import ast, pathlib; ast.parse(pathlib.Path('Preparador_de_Logos.pyw').read_text(encoding='utf-8'))"
+  python -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8')) for path in (pathlib.Path('Preparador_de_Logos.pyw'), pathlib.Path('embimage_ui.py'))]"
   ```
+
+- Para validar o processamento real, as exportações e os estados da interface (requer Tkinter disponível):
+
+  ```powershell
+  python -m unittest discover -s tests -v
+  ```
+
+- `tests/test_image_quality.py` compara uma referência com letras serifadas e linhas finas com sua versão reduzida. Verifica a geometria das letras, a cobertura parcial dos traços, as uniões de cores e a transparência, incluindo bordas no nível 3.
+- `tests/test_jpeg_quality.py` verifica resíduos de fundos coloridos, detalhes internos protegidos e a preservação de pontos e linhas legítimos em imagens JPEG.
 
 ## Licença
 

@@ -4,3 +4,10 @@ __pycache__/
 # Ambientes virtuais locais
 .venv/
 venv/
+
+# Pacotes Windows e arquivos temporários de compilação
+build/
+dist/
+
+# Imagens geradas para conferência local
+artifacts/
